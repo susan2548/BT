@@ -1,0 +1,10 @@
+.gradle/
+.idea/
+build/
+app/build/
+local.properties
+*.iml
+simulator/runtime/
+simulator/__pycache__/
+*.pyc
+write-test.txt
