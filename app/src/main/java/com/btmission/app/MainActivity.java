@@ -1,6 +1,7 @@
 package com.btmission.app;
 
 import android.Manifest;
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
@@ -40,6 +41,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
+import android.view.animation.LinearInterpolator;
 import android.view.HapticFeedbackConstants;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -97,6 +99,7 @@ public class MainActivity extends Activity {
     private boolean updatingPayload = false;
     private boolean payloadExpanded = false;
     private boolean english = false;
+    private boolean motionEnabled = true;
     private boolean logExpanded = false;
     private int phase = 0; // 0 first read, 1 write, 2 second read, 3 complete
     private int pendingRead = 0;
@@ -133,6 +136,8 @@ public class MainActivity extends Activity {
     private TextView resultLabel;
     private TextView logText;
     private Button languageButton;
+    private Button motionButton;
+    private HeroArtView heroArt;
     private Button logButton;
     private Button copyButton;
     private Button shareButton;
@@ -155,6 +160,7 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         english = getPreferences(MODE_PRIVATE).getBoolean("english", false);
+        motionEnabled = getPreferences(MODE_PRIVATE).getBoolean("motion_enabled", true);
         Window window = getWindow();
         window.setStatusBarColor(BG);
         window.setNavigationBarColor(BG);
@@ -287,7 +293,8 @@ public class MainActivity extends Activity {
         FrameLayout hero = new FrameLayout(this);
         hero.setBackground(shape(Color.rgb(255, 161, 72), 22));
         hero.setClipToOutline(true);
-        hero.addView(new HeroArtView(), new FrameLayout.LayoutParams(-1, -1));
+        heroArt = new HeroArtView();
+        hero.addView(heroArt, new FrameLayout.LayoutParams(-1, -1));
         LinearLayout heroContent = column();
         heroContent.setPadding(dp(18), dp(9), dp(18), 0);
         FrameLayout.LayoutParams heroContentParams = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
@@ -295,6 +302,13 @@ public class MainActivity extends Activity {
         LinearLayout heroTop = row();
         TextView heroKicker = text("✦  CLASS BLUETOOTH PROJECT", 10, INK, true);
         heroTop.addView(heroKicker, new LinearLayout.LayoutParams(0, -2, 1));
+        motionButton = button("II", false);
+        motionButton.setTextSize(12);
+        motionButton.setMinHeight(dp(30));
+        motionButton.setBackground(outlined(Color.rgb(255, 248, 226), Color.rgb(230, 123, 58), 99));
+        LinearLayout.LayoutParams motionParams = lp(36, 31);
+        motionParams.rightMargin = dp(5);
+        heroTop.addView(motionButton, motionParams);
         languageButton = button("EN", false);
         languageButton.setTextSize(12);
         languageButton.setMinHeight(dp(30));
@@ -468,6 +482,12 @@ public class MainActivity extends Activity {
             getPreferences(MODE_PRIVATE).edit().putBoolean("english", english).apply();
             refreshUi();
         });
+        motionButton.setOnClickListener(v -> {
+            motionEnabled = !motionEnabled;
+            getPreferences(MODE_PRIVATE).edit().putBoolean("motion_enabled", motionEnabled).apply();
+            heroArt.setAnimationEnabled(motionEnabled);
+            refreshUi();
+        });
         connectButton.setOnClickListener(v -> beginScan());
         disconnectButton.setOnClickListener(v -> { if (gatt != null) gatt.disconnect(); });
         firstReadButton.setOnClickListener(v -> read(1));
@@ -569,6 +589,9 @@ public class MainActivity extends Activity {
         languageButton.setText(english ? "ไทย" : "EN");
         heroSubtitle.setText(tr("เชื่อมต่อ • อ่าน • ส่ง • รับผล", "Connect • Read • Send • Result"));
         heroHint.setText(tr("พิชิตภารกิจ แล้วรับผลจากอุปกรณ์จริง", "Complete the mission with real device data"));
+        motionButton.setText(motionEnabled ? "II" : "▶");
+        motionButton.setContentDescription(tr(motionEnabled ? "หยุดภาพเคลื่อนไหว" : "เล่นภาพเคลื่อนไหว",
+                motionEnabled ? "Pause animation" : "Play animation"));
         String[] th = {"เชื่อมต่อ", "อ่าน", "ส่ง", "ผล"};
         String[] en = {"CONNECT", "READ", "SEND", "RESULT"};
         for (int i = 0; i < 4; i++) progressLabels[i].setText(english ? en[i] : th[i]);
@@ -615,6 +638,8 @@ public class MainActivity extends Activity {
     }
     private void refreshUi() {
         if (connectButton == null) return;
+        heroArt.setMissionComplete(phase == 3);
+        heroArt.setAnimationEnabled(motionEnabled);
         connectButton.setEnabled(adapter != null && !busy && !connected);
         disconnectButton.setEnabled(connected && !busy);
         firstReadButton.setEnabled(connected && !busy && phase == 0);
@@ -640,20 +665,60 @@ public class MainActivity extends Activity {
 
     private class HeroArtView extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        HeroArtView() { super(MainActivity.this); }
+        private final ValueAnimator animator = ValueAnimator.ofFloat(0f, 1f);
+        private float frame = 0f;
+        private boolean animationEnabled = true;
+        private boolean missionComplete = false;
+        HeroArtView() {
+            super(MainActivity.this);
+            animator.setDuration(4200);
+            animator.setRepeatCount(ValueAnimator.INFINITE);
+            animator.setInterpolator(new LinearInterpolator());
+            animator.addUpdateListener(value -> {
+                frame = (float) value.getAnimatedValue();
+                invalidate();
+            });
+        }
+        void setAnimationEnabled(boolean enabled) {
+            if (animationEnabled == enabled) return;
+            animationEnabled = enabled;
+            updateAnimation();
+        }
+        void setMissionComplete(boolean complete) {
+            if (missionComplete == complete) return;
+            missionComplete = complete;
+            invalidate();
+        }
+        private void updateAnimation() {
+            if (animationEnabled && isAttachedToWindow() && getWindowVisibility() == View.VISIBLE) {
+                if (!animator.isStarted()) animator.start();
+            } else {
+                animator.cancel();
+                frame = 0f;
+                invalidate();
+            }
+        }
+        @Override protected void onAttachedToWindow() { super.onAttachedToWindow(); updateAnimation(); }
+        @Override protected void onDetachedFromWindow() { animator.cancel(); super.onDetachedFromWindow(); }
+        @Override protected void onWindowVisibilityChanged(int visibility) {
+            super.onWindowVisibilityChanged(visibility);
+            updateAnimation();
+        }
         private void fill(Canvas c, int color, Path path) { paint.setShader(null); paint.setColor(color); c.drawPath(path, paint); }
         @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
             canvas.save();
             canvas.scale(getWidth() / 360f, getHeight() / 175f);
+            float wave = (float) Math.sin(frame * Math.PI * 2);
+            float shimmer = (float) Math.sin(frame * Math.PI * 4);
             paint.setShader(new LinearGradient(0, 0, 0, 175, 0xFFFFB052, 0xFFFF7443, Shader.TileMode.CLAMP));
             canvas.drawRect(0, 0, 360, 175, paint);
             paint.setShader(null);
             paint.setColor(0x66FFE9A2);
-            canvas.drawCircle(283, 56, 33, paint);
+            canvas.drawCircle(283, 56, 33 + 2 * shimmer, paint);
             paint.setColor(0x88FFFFFF);
-            canvas.drawOval(225, 23, 265, 32, paint);
-            canvas.drawOval(278, 17, 326, 27, paint);
+            canvas.drawOval(225 + 12 * frame, 23, 265 + 12 * frame, 32, paint);
+            canvas.drawOval(278 - 15 * frame, 17, 326 - 15 * frame, 27, paint);
             Path far = new Path();
             far.moveTo(0, 150); far.cubicTo(60, 110, 120, 154, 174, 122);
             far.cubicTo(235, 90, 295, 124, 360, 100); far.lineTo(360, 175); far.lineTo(0, 175); far.close();
@@ -670,7 +735,9 @@ public class MainActivity extends Activity {
             canvas.drawLine(318, 102, 318, 140, paint);
             Path flag = new Path(); flag.moveTo(319, 103); flag.lineTo(345, 110); flag.lineTo(319, 117); flag.close();
             fill(canvas, 0xFFFFE39F, flag);
-            canvas.save(); canvas.translate(185, 0); canvas.rotate(-25, 65, 126);
+            float bob = animationEnabled ? 4 * wave : 0;
+            float launch = missionComplete ? 18 : 0;
+            canvas.save(); canvas.translate(185, -bob - launch); canvas.rotate(-25 + 2 * wave, 65, 126);
             Path rocket = new Path();
             rocket.moveTo(65, 99); rocket.cubicTo(80, 108, 80, 131, 65, 143);
             rocket.cubicTo(50, 130, 50, 109, 65, 99); rocket.close();
@@ -678,8 +745,17 @@ public class MainActivity extends Activity {
             Path finL = new Path(); finL.moveTo(55, 126); finL.lineTo(45, 137); finL.lineTo(57, 135); finL.close(); fill(canvas, 0xFF302A70, finL);
             Path finR = new Path(); finR.moveTo(75, 126); finR.lineTo(86, 137); finR.lineTo(73, 135); finR.close(); fill(canvas, 0xFF302A70, finR);
             paint.setColor(Color.WHITE); canvas.drawCircle(65, 119, 5, paint);
-            Path flame = new Path(); flame.moveTo(60, 142); flame.lineTo(65, 157); flame.lineTo(70, 142); flame.close(); fill(canvas, 0xFFFFD448, flame);
+            Path flame = new Path(); flame.moveTo(60, 142); flame.lineTo(65, 156 + 5 * shimmer); flame.lineTo(70, 142); flame.close(); fill(canvas, 0xFFFFD448, flame);
             canvas.restore();
+            paint.setColor(0xFFFFF5CA);
+            canvas.drawCircle(214, 84 + 2 * wave, 2 + Math.abs(shimmer), paint);
+            canvas.drawCircle(285, 94 - 3 * wave, 1.5f + Math.abs(wave), paint);
+            if (missionComplete) {
+                paint.setColor(0xFFFFE8A0);
+                canvas.drawCircle(234, 119 + 2 * wave, 3, paint);
+                canvas.drawCircle(276, 145 - 2 * wave, 2.5f, paint);
+                canvas.drawCircle(305, 86 + 2 * shimmer, 2.5f, paint);
+            }
             canvas.restore();
         }
     }
